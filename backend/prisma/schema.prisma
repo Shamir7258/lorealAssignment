@@ -1,0 +1,45 @@
+// Data model for the Claims Intelligence Engine.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssessmentStatus {
+  PENDING      // created, LLM call in progress
+  COMPLETED    // LLM verdict saved, confidence above review threshold
+  NEEDS_REVIEW // LLM verdict saved, a human must review (low confidence or not justified)
+  FAILED       // LLM call failed, timed out, or returned invalid JSON
+}
+
+model Claim {
+  id          String       @id @default(uuid())
+  text        String       // e.g. "Reduces wrinkles by 20% in 4 weeks"
+  productName String
+  market      String?      // optional, e.g. "EU"
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  assessments Assessment[]
+}
+
+model Assessment {
+  id              String           @id @default(uuid())
+  claimId         String
+  claim           Claim            @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidence        String           // evaluator's study results, as submitted
+  status          AssessmentStatus @default(PENDING)
+  justified       Boolean?         // null until the LLM has answered
+  confidenceScore Float?           // 0..1, model self-reported, uncalibrated
+  reasoning       String?
+  model           String           // model used, for audit
+  promptVersion   String           // prompt version used, for audit
+  errorMessage    String?          // set when status = FAILED
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([claimId])
+  @@index([status])
+}
