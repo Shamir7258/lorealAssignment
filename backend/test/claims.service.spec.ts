@@ -56,3 +56,38 @@ describe('LlmJudgeService mock mode (no OPENAI_API_KEY)', () => {
     expect(v.justified).toBe(false);
   });
 });
+
+describe('ClaimsService.history', () => {
+  const row = (n: number) => ({
+    id: `a${n}`, claimId: `c${n}`, status: 'COMPLETED', justified: true, confidenceScore: 0.8, reasoning: 'r',
+    model: 'm', promptVersion: 'v1', createdAt: new Date('2026-01-01T00:00:00Z'),
+    claim: { text: `claim ${n}`, productName: 'Serum X', market: null },
+  });
+  function setupHistory(total: number, rows: any[]) {
+    const count = jest.fn(async () => total);
+    const findMany = jest.fn(async () => rows);
+    const prisma: any = { assessment: { count, findMany }, $transaction: (ops: Promise<any>[]) => Promise.all(ops) };
+    return { service: new ClaimsService(prisma, {} as any, { get: () => undefined } as any), findMany };
+  }
+
+  it('maps rows, computes totalPages and applies skip/take', async () => {
+    const { service, findMany } = setupHistory(25, [row(1), row(2)]);
+    const res = await service.history(2, 10);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 10, take: 10 }));
+    expect(res).toMatchObject({ total: 25, page: 2, pageSize: 10, totalPages: 3 });
+    expect(res.items[0]).toEqual({
+      assessmentId: 'a1', claimId: 'c1', claimText: 'claim 1', productName: 'Serum X', market: null,
+      status: 'COMPLETED', justified: true, confidenceScore: 0.8, reasoning: 'r', model: 'm', promptVersion: 'v1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+  });
+  it('reports at least one page when empty', async () => {
+    const { service } = setupHistory(0, []);
+    expect(await service.history(1, 10)).toMatchObject({ items: [], total: 0, totalPages: 1 });
+  });
+  it('only lists assessments that have a verdict', async () => {
+    const { service, findMany } = setupHistory(0, []);
+    await service.history(1, 10);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: { in: ['COMPLETED', 'NEEDS_REVIEW'] } } }));
+  });
+});

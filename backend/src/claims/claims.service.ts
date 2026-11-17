@@ -1,7 +1,7 @@
 import { BadGatewayException, GatewayTimeoutException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { AssessClaimDto, AssessClaimResponse } from './dto/assess-claim.dto';
+import { AssessClaimDto, AssessClaimResponse, ClaimHistoryResponse } from './dto/assess-claim.dto';
 import { LlmError, LlmJudgeService } from './llm/llm-judge.service';
 
 @Injectable()
@@ -67,5 +67,40 @@ export class ClaimsService {
       }
       throw new BadGatewayException('The AI assessment failed. Please try again or request manual review.');
     }
+  }
+
+  /** Paginated history, newest first, limited to assessments that have a verdict. */
+  async history(page: number, pageSize: number): Promise<ClaimHistoryResponse> {
+    const where = { status: { in: ['COMPLETED', 'NEEDS_REVIEW'] as ('COMPLETED' | 'NEEDS_REVIEW')[] } };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.assessment.count({ where }),
+      this.prisma.assessment.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], // id breaks ties so pages are stable
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { claim: true },
+      }),
+    ]);
+    return {
+      items: rows.map((a) => ({
+        assessmentId: a.id,
+        claimId: a.claimId,
+        claimText: a.claim.text,
+        productName: a.claim.productName,
+        market: a.claim.market,
+        status: a.status as 'COMPLETED' | 'NEEDS_REVIEW',
+        justified: a.justified as boolean,
+        confidenceScore: a.confidenceScore as number,
+        reasoning: a.reasoning as string,
+        model: a.model,
+        promptVersion: a.promptVersion,
+        createdAt: a.createdAt.toISOString(),
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
   }
 }

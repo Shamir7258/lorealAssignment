@@ -1,6 +1,6 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import { ClaimsService } from './claims.service';
-import { AssessClaimDto, AssessClaimResponse } from './dto/assess-claim.dto';
+import { AssessClaimDto, AssessClaimResponse, ClaimHistoryResponse, ListClaimsQueryDto } from './dto/assess-claim.dto';
 
 @Controller('claims')
 export class ClaimsController {
@@ -11,5 +11,11 @@ export class ClaimsController {
   @HttpCode(201)
   assess(@Body() dto: AssessClaimDto): Promise<AssessClaimResponse> {
     return this.claims.assess(dto);
+  }
+
+  /** GET /api/claims?page=1&pageSize=10: paginated history of assessed claims, newest first. */
+  @Get()
+  history(@Query() query: ListClaimsQueryDto): Promise<ClaimHistoryResponse> {
+    return this.claims.history(query.page, query.pageSize);
   }
 }

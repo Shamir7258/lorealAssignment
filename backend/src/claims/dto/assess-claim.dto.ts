@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 /** Request body of POST /api/claims/assess. */
 export class AssessClaimDto {
@@ -37,4 +38,40 @@ export interface AssessClaimResponse {
   model: string;
   promptVersion: string;
   createdAt: string; // ISO 8601
+}
+
+/** Query string of GET /api/claims, for example ?page=2&pageSize=10. */
+export class ListClaimsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  pageSize: number = 10;
+}
+
+/** One row of the history: the POST response fields plus the claim they belong to. */
+export interface ClaimHistoryItem extends AssessClaimResponse {
+  claimText: string;
+  productName: string;
+  market: string | null;
+}
+
+/**
+ * Response body of GET /api/claims (HTTP 200).
+ * Newest first. Only assessments with a verdict (COMPLETED, NEEDS_REVIEW) are listed;
+ * FAILED and PENDING ones are not. Evidence text is not returned.
+ */
+export interface ClaimHistoryResponse {
+  items: ClaimHistoryItem[];
+  total: number; // all matching assessments
+  page: number; // 1-based
+  pageSize: number;
+  totalPages: number; // at least 1
 }
