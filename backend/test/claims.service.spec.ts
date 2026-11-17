@@ -43,3 +43,16 @@ describe('LlmJudgeService.parseVerdict', () => {
   it('rejects out-of-range confidence', () => expect(() => parse('{"justified":true,"confidence":1.5,"reasoning":"r"}')).toThrow('schema'));
   it('rejects empty content', () => expect(() => parse(null)).toThrow('Empty'));
 });
+
+describe('LlmJudgeService mock mode (no OPENAI_API_KEY)', () => {
+  const svc = new LlmJudgeService({ get: () => undefined, getOrThrow: () => { throw new Error('unused'); } } as any);
+  it('is enabled and labelled', () => { expect(svc.isMock).toBe(true); expect(svc.model).toBe('mock-llm'); });
+  it('justifies when evidence meets the claim and is significant', async () => {
+    const v = await svc.judge('Reduces wrinkles by 20% in 4 weeks', 'Serum X', undefined, 'n=60, -22% at week 4, p<0.01');
+    expect(v.justified).toBe(true);
+  });
+  it('rejects when effect is smaller than claimed', async () => {
+    const v = await svc.judge('Reduces wrinkles by 20% in 4 weeks', 'Serum X', undefined, 'n=60, -8% at week 4, p<0.01');
+    expect(v.justified).toBe(false);
+  });
+});

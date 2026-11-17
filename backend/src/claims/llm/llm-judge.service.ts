@@ -19,21 +19,52 @@ export class LlmError extends Error {
 @Injectable()
 export class LlmJudgeService {
   private readonly logger = new Logger(LlmJudgeService.name);
-  private readonly client: OpenAI;
+  private readonly client?: OpenAI; // undefined in mock mode
+  readonly isMock: boolean;
   readonly model: string;
   readonly promptVersion = PROMPT_VERSION;
 
   constructor(config: ConfigService) {
-    const apiKey = config.getOrThrow<string>('OPENAI_API_KEY'); // fail fast, never hardcode
-    this.model = config.getOrThrow<string>('OPENAI_MODEL');
-    this.client = new OpenAI({
-      apiKey,
-      timeout: Number(config.get('OPENAI_TIMEOUT_MS') ?? 30000),
-      maxRetries: 1, // one retry on transient errors (connection, 429, 5xx)
-    });
+    const apiKey = config.get<string>('OPENAI_API_KEY')?.trim(); // never hardcoded
+    this.isMock = !apiKey;
+    if (this.isMock) {
+      // Demo mode: no key, so no real model is called. Verdicts are rule-based and labelled [MOCK].
+      this.model = 'mock-llm';
+      this.logger.warn('OPENAI_API_KEY is not set: using the MOCK LLM provider. Verdicts are NOT real AI judgements.');
+    } else {
+      this.model = config.getOrThrow<string>('OPENAI_MODEL');
+      this.client = new OpenAI({
+        apiKey,
+        timeout: Number(config.get('OPENAI_TIMEOUT_MS') ?? 30000),
+        maxRetries: 1, // one retry on transient errors (connection, 429, 5xx)
+      });
+    }
+  }
+
+  /**
+   * Deterministic stand-in for the LLM. Justified only if the evidence reports a percentage change
+   * at least as large as the claimed one AND a significance statistic (p <= 0.05). Crude on purpose.
+   */
+  mockJudge(claimText: string, evidence: string): Verdict {
+    const claimPct = Number(/(\d+(?:\.\d+)?)\s*%/.exec(claimText)?.[1]);
+    const evidencePcts = [...evidence.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => Number(m[1]));
+    const best = evidencePcts.length ? Math.max(...evidencePcts) : NaN;
+    const significant = /p\s*(<|<=|=)\s*0?\.0(?:[0-4]\d*|5)\b/i.test(evidence);
+    if (Number.isNaN(claimPct) || Number.isNaN(best)) {
+      return { justified: false, confidence: 0.3, reasoning: '[MOCK] Could not find a percentage in both the claim and the evidence, so support cannot be established.' };
+    }
+    const justified = best >= claimPct && significant;
+    return {
+      justified,
+      confidence: justified ? 0.85 : 0.6,
+      reasoning: `[MOCK] Claim states ${claimPct}%; the largest effect found in the evidence is ${best}%; ` +
+        `${significant ? 'a significant p-value (p <= 0.05) is reported' : 'no significant p-value was found'}. ` +
+        'This is a rule-based demo result, not an AI judgement.',
+    };
   }
 
   async judge(claimText: string, productName: string, market: string | undefined, evidence: string): Promise<Verdict> {
+    if (this.isMock || !this.client) return this.mockJudge(claimText, evidence);
     let content: string | null | undefined;
     try {
       const res = await this.client.chat.completions.create({
